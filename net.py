@@ -61,13 +61,13 @@ class DQN(nn.Module):
 
     def __init__(self):
         super(DQN, self).__init__()
-        self.conv1 = nn.Conv2d(1, 16, kernel_size=3, stride=1, padding=1)
+        self.conv1 = nn.Conv2d(2, 16, kernel_size=3, stride=1, padding=1)
         self.bn1 = nn.BatchNorm2d(16)
         self.conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1)
         self.bn2 = nn.BatchNorm2d(32)
         self.conv3 = nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1)
         self.bn3 = nn.BatchNorm2d(32)
-        self.head = nn.Linear(1568, 2401)
+        self.head = nn.Linear(1568, 1)
 
     def forward(self, x):
         x = F.relu(self.bn1(self.conv1(x)))
@@ -100,10 +100,16 @@ def select_action(state):
         math.exp(-1. * steps_done / EPS_DECAY)
     steps_done += 1
     if sample > eps_threshold:
-        # move to cpu, convert to numpy, index into array, unravel index
-        x = model(
-            Variable(state, volatile=True).type(FloatTensor)).data.max(1)[1].cpu().numpy()[0]
-        return LongTensor(torch.from_numpy(np.array(np.unravel_index(x, (7, 7, 7, 7)))))
+        optim = None
+        reward = -25252
+        for i in env.get_moves():
+            state_action = torch.cat([state, torch.from_numpy(i)]).unsqueeze(0)
+            x = model(
+                Variable(state_action, volatile=True).type(FloatTensor))
+            if x > reward:
+                optim = i
+                reward = x
+        return optim    
     else:
         return LongTensor([random.randrange(7) for i in range(4)])
 
@@ -130,18 +136,21 @@ def optimize_model():
     action_batch = Variable(torch.cat(batch.action))
     reward_batch = Variable(torch.cat(batch.reward))
 
-    # no grad
-    if any([s for s in batch.next_state if s is not None]):
-        non_final_next_states = Variable(torch.cat([s for s in batch.next_state if s is not None]),
-                                         volatile=True)
-        next_state_values = Variable(torch.zeros(BATCH_SIZE).type(Tensor))
-        next_state_values[non_final_mask] = model(
-            non_final_next_states).max(1)[0]
-        expected_state_action_values = (next_state_values * GAMMA) + reward_batch
-    else:
-        expected_state_action_values = reward_batch
+    values = []
 
-    state_action_values = model(state_batch).gather(1, action_batch)
+    next_state_values = Variable(torch.zeros(BATCH_SIZE).type(Tensor))
+    for s in batch.next_state:
+        for move in env.get_moves(batch.next_state):
+
+
+    
+    # no grad for next states
+    non_final_next_states = Variable(torch.cat(),
+                                        volatile=True)
+    # calculate next_state_values[non_final_mask]
+    expected_state_action_values = (next_state_values * GAMMA) + reward_batch
+
+    state_action_values = model(torch.cat([state_batch, action_batch], 1))
 
     # clean the volatile flag, ends up with require_grad = false only
     next_state_values.volatile = False

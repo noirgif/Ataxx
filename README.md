@@ -30,3 +30,5 @@ So to train the network:
 * Change the structure of the network
 
 * Make a function in env which generate feasible moves from the state
+
+* Rewrite the environment API to enable plays
