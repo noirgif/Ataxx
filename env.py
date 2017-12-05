@@ -31,17 +31,9 @@ def put(old_board, move):
 
             board: the change on the board"""
     board = deepcopy(old_board)
-    # must move a piece of oneself
-    if (board[move[0], move[1]] != 1).any():
-        return False, None
-    # cannot move onto another piece
-    if (board[move[2], move[3]] != 0).any():
-        return False, None
     # the distance of the move
     dist = max([abs(move[i] - move[2 + i]) for i in range(2)])
-    if dist > 2:
-        return False, None
-    elif dist == 2:
+    if dist == 2:
         # jump
         board[move[0], move[1]] = 0
         board[move[2], move[3]] = 1
@@ -54,19 +46,39 @@ def put(old_board, move):
     return True, board - old_board
 
 
+dx1 = list(range(-1, 2))
+dx1 = dx1 + [-1, 1] + dx1
+dy1 = ([-1] * 3) + ([0] * 2) + ([1] * 3)
+d1 = zip(dx1, dy1)
+dx2 = list(range(-2, 3))
+dx2 = dx2 + ([-2, 2] * 3) + dx2
+dy2 = ([-2] * 5) + [-1, -1, 0, 0, 1, 1] + ([2] * 5)
+d2 = zip(dx2, dy2)
+av_moves = list(d1) + list(d2)
+
+
 def get_moves(board):
     """get the moves available in current board"""
     moves = []
+    clone_found = False
+    no_move = True
     for x in range(SIZE):
         for y in range(SIZE):
-            if (board[x, y] == 1).any():
-                for dx in range(x - 2, x + 3):
-                    for dy in range(y - 2, y + 3):
-                        if (dx in range(SIZE)) and (dy in range(SIZE)):
-                            if (board[dx, dy] == 0).any():
-                                result = put(board, (x, y, dx, dy))
-                                yield result[1]
-    yield np.zeros((SIZE, SIZE), dtype=np.int32)
+            if (board[x, y] == 0).any():
+                for dx, dy in av_moves:
+                    xx = x + dx
+                    yy = y + dy
+                    if xx in range(SIZE) and yy in range(SIZE)\
+                            and (board[xx, yy] == 1).any():
+                        if (dx, dy) in d1:
+                            if clone_found:
+                                continue
+                            else:
+                                clone_found = True
+                        no_move = False
+                        yield put(board, (xx, yy, x, y))[1]
+    if no_move:
+        yield np.zeros((SIZE, SIZE), dtype=np.int32)
 
 
 def step(board, action):
@@ -83,14 +95,13 @@ class Play:
     def __init__(self):
         self.b = new_board()
 
-
     def reset(self):
         """ reset the chessboard"""
         self.b = new_board()
 
     def step(self, action):
         """ make a step in current board
-            
+
             returns a tuple of reward, done"""
         reward, done = step(self.b, action)
         if done:

@@ -92,7 +92,7 @@ if use_cuda:
     model.cuda()
 
 optimizer = optim.Adam(model.parameters())
-memory = ReplayMemory(1000)
+memory = ReplayMemory(2048)
 
 steps_done = 0
 
@@ -121,14 +121,7 @@ def select_action(state):
     return moves[x.max(0)[1].data.sum()]
 
 
-episode_durations = []
-
-
-last_sync = 0
-
-
 def optimize_model():
-    global last_sync
     if len(memory) < BATCH_SIZE:
         return
     transitions = memory.sample(BATCH_SIZE)
@@ -149,19 +142,19 @@ def optimize_model():
     # calculate next_state_values[non_final_mask]
     non_final_next_state_values = []
     for s in non_final_next_states:
-        v = -25252.
-        # convert to numpy SIZExSIZE
+        # convert to numpy array SIZExSIZE
         state = s.squeeze().squeeze().cpu().numpy()
         moves = [move for move in env.get_moves(state)]
         moves = map(lambda x: torch.from_numpy(x).type(
             LongTensor).unsqueeze(0).unsqueeze(0), moves)
+        # concat with state to make input
         moves = map(lambda x: torch.cat([x, s], 1), moves)
+
         state_action = torch.cat(list(moves))
         state_action = Variable(state_action.type(FloatTensor), volatile=True)
         result = model(state_action)
         state_action.volatile = False
-        v = result.max(0)[0]
-        non_final_next_state_values.append(v.data)
+        non_final_next_state_values.append(result.max(0)[0].data)
     non_final_next_state_values = torch.cat(non_final_next_state_values)
 
     state_action_values = model(torch.cat([state_batch, action_batch], 1))
@@ -202,6 +195,23 @@ if __name__ == '__main__':
         else:
             print("=> no checkpoint found at '{}'".format(sys.argv[1]))
 
+    if len(sys.argv) > 2 and sys.argv[2] == 'play':
+        play.reset()
+        done = False
+        while not done:
+            # NO check!
+            print(play.b)
+            print("Enter your move")
+            move = list(map(int, input().split(' ')))
+            _, change = env.put(play.b, move)
+            _, done = play.step(change)
+            print(-play.b)
+            if done:
+                break
+            # would be better without the random choice
+            _, done = play.step(select_action(torch.from_numpy(
+                play.b).type(LongTensor).unsqueeze(0).unsqueeze(0)))
+        sys.exit(0)
     # instantiate a play
     for i_episode in range(start_episode, num_episodes):
         print("Episode {}".format(i_episode))
@@ -229,7 +239,6 @@ if __name__ == '__main__':
 
             optimize_model()
             if done:
-                episode_durations.append(t + 1)
                 break
         save_checkpoint({
             'episode': i_episode + 1,
