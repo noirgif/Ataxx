@@ -28,11 +28,12 @@ Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
 
 
+play = env.Play()
 def get_env():
-    cb = env.get()
+    cb = play.b
     cb = torch.from_numpy(cb)
     # add two dimensions `channel` and `batch`
-    return cb.unsqueeze(0).unsqueeze(0).type(Tensor)
+    return cb.type(LongTensor).unsqueeze(0).unsqueeze(0)
 
 
 class ReplayMemory(object):
@@ -77,7 +78,7 @@ class DQN(nn.Module):
 
 
 BATCH_SIZE = 128
-GAMMA = -0.999
+GAMMA = -0.9
 EPS_START = 0.9
 EPS_END = 0.05
 EPS_DECAY = 200
@@ -94,25 +95,34 @@ steps_done = 0
 
 
 def select_action(state):
+    """ select an action with given state
+        state: LongTensor(cuda)
+        NOTICE! it returns a numpy array for ease of calculation"""
     global steps_done
     sample = random.random()
     eps_threshold = EPS_END + (EPS_START - EPS_END) * \
         math.exp(-1. * steps_done / EPS_DECAY)
     steps_done += 1
-    if sample > eps_threshold:
-        optim = None
-        reward = -25252
-        for i in env.get_moves():
-            state_action = torch.cat([state, torch.from_numpy(i)]).unsqueeze(0)
-            x = model(
-                Variable(state_action, volatile=True).type(FloatTensor))
-            if x > reward:
-                optim = i
-                reward = x
-        return optim    
-    else:
-        return LongTensor([random.randrange(7) for i in range(4)])
 
+    # is iterating through all samples a bad idea?
+    moves = [i for i in env.get_moves(state.squeeze().squeeze().cpu().numpy())]
+    if sample <  eps_threshold:
+        return random.choice(moves)
+    # optimal move
+    optim = None
+    reward = -25252
+    for move in moves:
+        # the state is tensor of 1x1xSIZExSIZE and move is SIZExSIZE, 
+        # so to concat them into 1x2xSIZExSIZE, needs to unsqueeze, cat
+        action = torch.from_numpy(move).type(LongTensor).unsqueeze(0).unsqueeze(0)
+        state_action = torch.cat([state, action], 1)
+        x = model(
+            Variable(state_action, volatile=True).type(FloatTensor))
+        # x is 1x1 Variable, needs any to convert the result to bool
+        if (x > reward).data.any():
+            optim = move
+            reward = x
+    return optim
 
 episode_durations = []
 
@@ -127,36 +137,40 @@ def optimize_model():
     transitions = memory.sample(BATCH_SIZE)
 
     batch = Transition(*zip(*transitions))
-    print(batch.action)
 
     non_final_mask = ByteTensor(
         tuple(map(lambda s: s is not None, batch.next_state)))
 
-    state_batch = Variable(torch.cat(batch.state))
-    action_batch = Variable(torch.cat(batch.action))
+    state_batch = Variable(torch.cat(batch.state).type(FloatTensor))
+    action_batch = Variable(torch.cat(batch.action).type(FloatTensor))
     reward_batch = Variable(torch.cat(batch.reward))
 
-    values = []
-
-    next_state_values = Variable(torch.zeros(BATCH_SIZE).type(Tensor))
-    for s in batch.next_state:
-        for move in env.get_moves(batch.next_state):
-
-
-    
     # no grad for next states
-    non_final_next_states = Variable(torch.cat(),
-                                        volatile=True)
+    non_final_next_states = [s for s in batch.next_state
+                                                if s is not None]
+
     # calculate next_state_values[non_final_mask]
-    expected_state_action_values = (next_state_values * GAMMA) + reward_batch
+    non_final_next_state_values = []
+    for s in non_final_next_states:
+        v = -25252.
+        # convert to numpy SIZExSIZE
+        state = s.squeeze().squeeze().cpu().numpy()
+        for j in env.get_moves(state):
+            move = torch.from_numpy(j).type(LongTensor).unsqueeze(0).unsqueeze(0)
+            state_action = Variable(torch.cat([s, move], 1).type(FloatTensor), volatile=True)
+            result = model(state_action)
+            state_action.volatile=False
+            if (result > v).data.any():
+                v = result
+        non_final_next_state_values.append(v.data)
+    non_final_next_state_values = torch.cat(non_final_next_state_values)
 
     state_action_values = model(torch.cat([state_batch, action_batch], 1))
 
-    # clean the volatile flag, ends up with require_grad = false only
-    next_state_values.volatile = False
+    next_state_values = Variable(torch.zeros(BATCH_SIZE).type(Tensor))
+    next_state_values[non_final_mask] = non_final_next_state_values
 
-    
-
+    expected_state_action_values = (next_state_values * GAMMA) + reward_batch
     # complute Huber loss
     loss = F.smooth_l1_loss(state_action_values, expected_state_action_values)
 
@@ -166,24 +180,32 @@ def optimize_model():
         param.grad.data.clamp_(-1, 1)
     optimizer.step()
 
+def save_checkpoint(state, filename='checkpoint.pth.tar'):
+    torch.save(state, filename)
+    shutil.copyfile(filename, 'model_best.pth.tar')
 
 if __name__ == '__main__':
-    num_episodes = 2000
+    num_episodes = 500
+    # instantiate a play
     for i_episode in range(num_episodes):
-        env.reset()
+        print("Episode {}".format(i_episode))
+        play.reset()
+        # state: SIZExSIZE array
         state = get_env()
-        print("State: ", state)
         for t in count():
             action = select_action(state)
-            print(action)
-            reward, done = env.step(action)
+            reward, done = play.step(action)
+            if t % 30 == 0:
+                print("Turn {}:\n".format(t), play.b)
             reward = Tensor([reward])
 
             if not done:
                 next_state = get_env()
             else:
                 next_state = None
-
+            # push a torch tensor rather than a numpy array
+            action = torch.from_numpy(action).type(LongTensor).unsqueeze(0).unsqueeze(0)
+            assert isinstance(action, LongTensor)
             memory.push(state, action, next_state, reward)
 
             state = next_state
@@ -192,3 +214,8 @@ if __name__ == '__main__':
             if done:
                 episode_durations.append(t + 1)
                 break
+        save_checkpoint({
+            'episode': i_episode + 1,
+            'state_dict': model.state_dict(),
+            'optimizer' : optimizer.state_dict()
+        })

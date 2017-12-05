@@ -22,16 +22,7 @@ def full(board):
         return False
 
 
-def have(board, point=(0, 0), shape=(1, 1)):
-    """check if there's a 1 piece in the `shape` around the `point` given"""
-    # subboard is the range around the point, within the board
-    subboard = board[
-        max(0, point[0] - shape[0]):min(SIZE, point[0] + shape[0] + 1),
-        max(0, point[1] - shape[1]):min(SIZE, point[1] + shape[1] + 1)]
-    return (subboard == 1).any()
-
-
-def put(board, move):
+def put(old_board, move):
     """move a piece on the board
         move: a tuple being (sourcex, sourcey, destx, desty)
         returns: a tuple of (bool, board)
@@ -39,11 +30,12 @@ def put(board, move):
             bool: True successful, False failed
 
             board: the change on the board"""
+    board = deepcopy(old_board)
     # must move a piece of oneself
-    if board[move[0], move[1]] != 1:
+    if (board[move[0], move[1]] != 1).any():
         return False, None
     # cannot move onto another piece
-    if board[move[2], move[3]] != 0:
+    if (board[move[2], move[3]] != 0).any():
         return False, None
     # the distance of the move
     dist = max([abs(move[i] - move[2 + i]) for i in range(2)])
@@ -55,11 +47,11 @@ def put(board, move):
         board[move[2], move[3]] = 1
     else:
         # clone
-        board[move[0], move[1]] = 1
+        board[move[2], move[3]] = 1
     # change neighbors' color
     board[max(0, move[2] - 1):min(SIZE, move[2] + 2),
-               max(0, move[3] - 1):min(SIZE, move[3] + 2)] &= 1
-    return True, board
+          max(0, move[3] - 1):min(SIZE, move[3] + 2)] &= 1
+    return True, board - old_board
 
 
 def get_moves(board):
@@ -67,18 +59,14 @@ def get_moves(board):
     moves = []
     for x in range(SIZE):
         for y in range(SIZE):
-            if bool(board[x, y] == 1):
+            if (board[x, y] == 1).any():
                 for dx in range(x - 2, x + 3):
                     for dy in range(y - 2, y + 3):
                         if (dx in range(SIZE)) and (dy in range(SIZE)):
-                            if board[dx, dy] == 0:
+                            if (board[dx, dy] == 0).any():
                                 result = put(board, (x, y, dx, dy))
-                                if not result[0]:
-                                    print("Error when applying", (x, y,
-                                                                  dx, dy), "to", board)
-                                else:
-                                    yield x[1]
-    yield np.zeros((SIZE, SIZE), dtype=np.int8)
+                                yield result[1]
+    yield np.zeros((SIZE, SIZE), dtype=np.int32)
 
 
 def step(board, action):
@@ -87,3 +75,26 @@ def step(board, action):
     board += action
     # the reward is the total pieces conquered
     return float(action.sum()), bool(board.all())
+
+
+class Play:
+    """wrapping of an Ataxx play"""
+
+    def __init__(self):
+        self.b = new_board()
+
+
+    def reset(self):
+        """ reset the chessboard"""
+        self.b = new_board()
+
+    def step(self, action):
+        """ make a step in current board
+            
+            returns a tuple of reward, done"""
+        reward, done = step(self.b, action)
+        if done:
+            reward += 765 if (self.b == 1).any() else -765
+        # reverse the board
+        self.b = -self.b
+        return reward, done
