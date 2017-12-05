@@ -30,3 +30,6 @@ So to train the network:
 * Write a torch tensor version of the environment
 
 * Find out which gamma and reward function works better
+
+* Use only one variable to do all the calculation in select_action
+   by concatentating all variables into only one and do the calculation on it
