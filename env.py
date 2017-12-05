@@ -86,7 +86,7 @@ def step(board, action):
         return : a tuple of reward, done"""
     board += action
     # the reward is the total pieces conquered
-    return float(action.sum()), bool(board.all())
+    return float(action.sum()), not bool((board == 1).any() and (board == -1).any() and not board.all())
 
 
 class Play:

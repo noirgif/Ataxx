@@ -163,7 +163,7 @@ def optimize_model():
     next_state_values[non_final_mask] = non_final_next_state_values
 
     expected_state_action_values = (next_state_values * GAMMA) + reward_batch
-    # complute Huber loss
+    # compute Huber loss
     loss = F.smooth_l1_loss(state_action_values, expected_state_action_values)
 
     optimizer.zero_grad()
