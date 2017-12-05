@@ -30,6 +30,8 @@ Transition = namedtuple('Transition',
 
 
 play = env.Play()
+
+
 def get_env():
     cb = play.b
     cb = torch.from_numpy(cb)
@@ -59,7 +61,7 @@ class ReplayMemory(object):
 
 
 class DQN(nn.Module):
-    """Deep Q-Net"""
+    """Deep Q-Net(not really)"""
 
     def __init__(self):
         super(DQN, self).__init__()
@@ -97,7 +99,7 @@ steps_done = 0
 
 def select_action(state):
     """ select an action with given state
-        state: LongTensor(cuda)
+        state: LongTensor(cuda if applicable)
         NOTICE! it returns a numpy array for ease of calculation"""
     global steps_done
     sample = random.random()
@@ -107,23 +109,17 @@ def select_action(state):
 
     # is iterating through all samples a bad idea?
     moves = [i for i in env.get_moves(state.squeeze().squeeze().cpu().numpy())]
-    if sample <  eps_threshold:
+    if sample < eps_threshold:
         return random.choice(moves)
     # optimal move
-    optim = None
-    reward = -25252
-    for move in moves:
-        # the state is tensor of 1x1xSIZExSIZE and move is SIZExSIZE, 
-        # so to concat them into 1x2xSIZExSIZE, needs to unsqueeze, cat
-        action = torch.from_numpy(move).type(LongTensor).unsqueeze(0).unsqueeze(0)
-        state_action = torch.cat([state, action], 1)
-        x = model(
-            Variable(state_action, volatile=True).type(FloatTensor))
-        # x is 1x1 Variable, needs any to convert the result to bool
-        if (x > reward).data.any():
-            optim = move
-            reward = x
-    return optim
+    moves_ts = map(lambda x: torch.from_numpy(x).type(
+        LongTensor).unsqueeze(0).unsqueeze(0), moves)
+    moves_ts = map(lambda x: torch.cat([x, state], 1), moves_ts)
+    state_action = torch.cat(list(moves_ts))
+    x = model(
+        Variable(state_action, volatile=True).type(FloatTensor))
+    return moves[x.max(0)[1].data.sum()]
+
 
 episode_durations = []
 
@@ -148,7 +144,7 @@ def optimize_model():
 
     # no grad for next states
     non_final_next_states = [s for s in batch.next_state
-                                                if s is not None]
+                             if s is not None]
 
     # calculate next_state_values[non_final_mask]
     non_final_next_state_values = []
@@ -156,19 +152,21 @@ def optimize_model():
         v = -25252.
         # convert to numpy SIZExSIZE
         state = s.squeeze().squeeze().cpu().numpy()
-        for j in env.get_moves(state):
-            move = torch.from_numpy(j).type(LongTensor).unsqueeze(0).unsqueeze(0)
-            state_action = Variable(torch.cat([s, move], 1).type(FloatTensor), volatile=True)
-            result = model(state_action)
-            state_action.volatile=False
-            if (result > v).data.any():
-                v = result
+        moves = [move for move in env.get_moves(state)]
+        moves = map(lambda x: torch.from_numpy(x).type(
+            LongTensor).unsqueeze(0).unsqueeze(0), moves)
+        moves = map(lambda x: torch.cat([x, s], 1), moves)
+        state_action = torch.cat(list(moves))
+        state_action = Variable(state_action.type(FloatTensor), volatile=True)
+        result = model(state_action)
+        state_action.volatile = False
+        v = result.max(0)[0]
         non_final_next_state_values.append(v.data)
     non_final_next_state_values = torch.cat(non_final_next_state_values)
 
     state_action_values = model(torch.cat([state_batch, action_batch], 1))
 
-    next_state_values = Variable(torch.zeros(BATCH_SIZE).type(Tensor))
+    next_state_values = Variable(reward_batch.data)
     next_state_values[non_final_mask] = non_final_next_state_values
 
     expected_state_action_values = (next_state_values * GAMMA) + reward_batch
@@ -181,8 +179,10 @@ def optimize_model():
         param.grad.data.clamp_(-1, 1)
     optimizer.step()
 
+
 def save_checkpoint(state, filename='checkpoint.pth.tar'):
     torch.save(state, filename)
+
 
 if __name__ == '__main__':
     start_episode = 0
@@ -196,11 +196,12 @@ if __name__ == '__main__':
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
             memory = checkpoint['memory']
+            steps_done = checkpoint['steps_done']
             print("=> loaded episode {}"
                   .format(checkpoint['episode']))
         else:
             print("=> no checkpoint found at '{}'".format(sys.argv[1]))
-    
+
     # instantiate a play
     for i_episode in range(start_episode, num_episodes):
         print("Episode {}".format(i_episode))
@@ -219,7 +220,8 @@ if __name__ == '__main__':
             else:
                 next_state = None
             # push a torch tensor rather than a numpy array
-            action = torch.from_numpy(action).type(LongTensor).unsqueeze(0).unsqueeze(0)
+            action = torch.from_numpy(action).type(
+                LongTensor).unsqueeze(0).unsqueeze(0)
             assert isinstance(action, LongTensor)
             memory.push(state, action, next_state, reward)
 
@@ -232,6 +234,7 @@ if __name__ == '__main__':
         save_checkpoint({
             'episode': i_episode + 1,
             'state_dict': model.state_dict(),
-            'optimizer' : optimizer.state_dict(),
-            'memory' : memory
+            'optimizer': optimizer.state_dict(),
+            'memory': memory,
+            'steps_done': steps_done
         })
