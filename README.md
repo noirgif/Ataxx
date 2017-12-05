@@ -1,5 +1,12 @@
 # Use DQN to play Ataxx
 
+## Dependency
+
+```
+pytorch
+numpy
+```
+
 ## Structure
 
 ```
