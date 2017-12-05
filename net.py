@@ -9,7 +9,8 @@ from copy import deepcopy
 from itertools import count
 import numpy as np
 import env
-
+import sys
+import os
 
 import torch
 import torch.nn as nn
@@ -182,12 +183,26 @@ def optimize_model():
 
 def save_checkpoint(state, filename='checkpoint.pth.tar'):
     torch.save(state, filename)
-    shutil.copyfile(filename, 'model_best.pth.tar')
 
 if __name__ == '__main__':
+    start_episode = 0
     num_episodes = 500
+
+    if len(sys.argv) > 1:
+        if os.path.isfile(sys.argv[1]):
+            print("=> loading checkpoint '{}'".format(sys.argv[1]))
+            checkpoint = torch.load(sys.argv[1])
+            start_episode = checkpoint['episode']
+            model.load_state_dict(checkpoint['state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer'])
+            memory = checkpoint['memory']
+            print("=> loaded episode {}"
+                  .format(checkpoint['episode']))
+        else:
+            print("=> no checkpoint found at '{}'".format(sys.argv[1]))
+    
     # instantiate a play
-    for i_episode in range(num_episodes):
+    for i_episode in range(start_episode, num_episodes):
         print("Episode {}".format(i_episode))
         play.reset()
         # state: SIZExSIZE array
@@ -217,5 +232,6 @@ if __name__ == '__main__':
         save_checkpoint({
             'episode': i_episode + 1,
             'state_dict': model.state_dict(),
-            'optimizer' : optimizer.state_dict()
+            'optimizer' : optimizer.state_dict(),
+            'memory' : memory
         })

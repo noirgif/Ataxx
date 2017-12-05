@@ -27,12 +27,6 @@ So to train the network:
 
 ## TO DO
 
-* Change the structure of the network
-
-* Make a function in env which generate feasible moves from the state
-
-* Rewrite the environment API to enable plays and getting available moves
-
 * Write a torch tensor version of the environment
 
 * Find out which gamma and reward function works better
