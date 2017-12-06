@@ -86,7 +86,7 @@ def step(board, action):
         return : a tuple of reward, done"""
     board += action
     # the reward is the total pieces conquered
-    return float(action.sum()), not bool((board == 1).any() and (board == -1).any() and not board.all())
+    return float(board.sum()), not bool((board == 1).any() and (board == -1).any() and not board.all())
 
 
 class Play:
@@ -105,7 +105,7 @@ class Play:
             returns a tuple of reward, done"""
         reward, done = step(self.b, action)
         if done:
-            reward += 765 if (self.b == 1).any() else -765
+            reward += 25252 if (self.b == 1).any() else -25252
         # reverse the board
         self.b = -self.b
         return reward, done

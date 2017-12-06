@@ -37,3 +37,5 @@ So to train the network:
 * Write a torch tensor version of the environment
 
 * Find out which gamma and reward function works better
+
+* (IMPORTANT) discard state_action, use state only to reduce feature space

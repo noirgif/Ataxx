@@ -80,11 +80,11 @@ class DQN(nn.Module):
         return self.head(x.view(x.size(0), -1))
 
 
-BATCH_SIZE = 128
-GAMMA = -0.9
+BATCH_SIZE = 256
+GAMMA = -0.99
 EPS_START = 0.9
-EPS_END = 0.05
-EPS_DECAY = 200
+EPS_END = 0.1
+EPS_DECAY = 2000
 
 model = DQN()
 
@@ -92,17 +92,20 @@ if use_cuda:
     model.cuda()
 
 optimizer = optim.Adam(model.parameters())
-memory = ReplayMemory(2048)
+memory = ReplayMemory(16384)
 
 steps_done = 0
 
 
-def select_action(state):
+def select_action(state, train=True):
     """ select an action with given state
         state: LongTensor(cuda if applicable)
         NOTICE! it returns a numpy array for ease of calculation"""
     global steps_done
-    sample = random.random()
+    if train:
+        sample = random.random()
+    else:
+        sample = 1
     eps_threshold = EPS_END + (EPS_START - EPS_END) * \
         math.exp(-1. * steps_done / EPS_DECAY)
     steps_done += 1
@@ -120,6 +123,7 @@ def select_action(state):
         Variable(state_action, volatile=True).type(FloatTensor))
     return moves[x.max(0)[1].data.sum()]
 
+episode_loss = []
 
 def optimize_model():
     if len(memory) < BATCH_SIZE:
@@ -157,7 +161,7 @@ def optimize_model():
         non_final_next_state_values.append(result.max(0)[0].data)
     non_final_next_state_values = torch.cat(non_final_next_state_values)
 
-    state_action_values = model(torch.cat([state_batch, action_batch], 1))
+    state_action_values = model(torch.cat([action_batch, state_batch], 1))
 
     next_state_values = Variable(reward_batch.data)
     next_state_values[non_final_mask] = non_final_next_state_values
@@ -165,6 +169,7 @@ def optimize_model():
     expected_state_action_values = (next_state_values * GAMMA) + reward_batch
     # compute Huber loss
     loss = F.smooth_l1_loss(state_action_values, expected_state_action_values)
+    print("Sample loss: {}".format(loss.data.sum()))
 
     optimizer.zero_grad()
     loss.backward()
@@ -173,13 +178,57 @@ def optimize_model():
     optimizer.step()
 
 
+def check_loss():
+    transitions = memory.memory
+
+    batch = Transition(*zip(*transitions))
+
+    non_final_mask = ByteTensor(
+        tuple(map(lambda s: s is not None, batch.next_state)))
+
+    state_batch = Variable(torch.cat(batch.state).type(FloatTensor))
+    action_batch = Variable(torch.cat(batch.action).type(FloatTensor))
+    reward_batch = Variable(torch.cat(batch.reward))
+
+    # no grad for next states
+    non_final_next_states = [s for s in batch.next_state
+                             if s is not None]
+
+    # calculate next_state_values[non_final_mask]
+    non_final_next_state_values = []
+    for s in non_final_next_states:
+        # convert to numpy array SIZExSIZE
+        state = s.squeeze().squeeze().cpu().numpy()
+        moves = [move for move in env.get_moves(state)]
+        moves = map(lambda x: torch.from_numpy(x).type(
+            LongTensor).unsqueeze(0).unsqueeze(0), moves)
+        # concat with state to make input
+        moves = map(lambda x: torch.cat([x, s], 1), moves)
+
+        state_action = torch.cat(list(moves))
+        state_action = Variable(state_action.type(FloatTensor), volatile=True)
+        result = model(state_action)
+        state_action.volatile = False
+        non_final_next_state_values.append(result.max(0)[0].data)
+    non_final_next_state_values = torch.cat(non_final_next_state_values)
+
+    state_action_values = model(torch.cat([action_batch, state_batch], 1))
+
+    next_state_values = Variable(reward_batch.data)
+    next_state_values[non_final_mask] = non_final_next_state_values
+
+    expected_state_action_values = (next_state_values * GAMMA) + reward_batch
+    # compute Huber loss
+    loss = F.smooth_l1_loss(state_action_values, expected_state_action_values)
+    print("Episode end loss: {}".format(loss.data.sum()))
+
 def save_checkpoint(state, filename='checkpoint.pth.tar'):
     torch.save(state, filename)
 
 
 if __name__ == '__main__':
     start_episode = 0
-    num_episodes = 500
+    num_episodes = 2000
 
     if len(sys.argv) > 1:
         if os.path.isfile(sys.argv[1]):
@@ -210,21 +259,21 @@ if __name__ == '__main__':
                 break
             # would be better without the random choice
             _, done = play.step(select_action(torch.from_numpy(
-                play.b).type(LongTensor).unsqueeze(0).unsqueeze(0)))
+                play.b).type(LongTensor).unsqueeze(0).unsqueeze(0), False))
         sys.exit(0)
     # instantiate a play
     for i_episode in range(start_episode, num_episodes):
         print("Episode {}".format(i_episode))
+        # clean
+        episode_loss = []
         play.reset()
         # state: SIZExSIZE array
         state = get_env()
         for t in count():
             action = select_action(state)
             reward, done = play.step(action)
-            if t % 30 == 0:
-                print("Turn {}:\n".format(t), play.b)
             reward = Tensor([reward])
-
+            print(-play.b if (t % 2 == 1) else play.b)
             if not done:
                 next_state = get_env()
             else:
@@ -232,14 +281,15 @@ if __name__ == '__main__':
             # push a torch tensor rather than a numpy array
             action = torch.from_numpy(action).type(
                 LongTensor).unsqueeze(0).unsqueeze(0)
-            assert isinstance(action, LongTensor)
             memory.push(state, action, next_state, reward)
 
             state = next_state
 
             optimize_model()
             if done:
+                print("Total {} turns".format(t))
                 break
+        check_loss()
         save_checkpoint({
             'episode': i_episode + 1,
             'state_dict': model.state_dict(),
