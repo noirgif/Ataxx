@@ -1,5 +1,11 @@
 # Use DQN to play Ataxx
 
+## Disclaimer
+
+The code gets its form from [the DQN tutorial](http://pytorch.org/tutorials/intermediate/reinforcement_q_learning.html), which is quite helpful. 
+
+The net now is still very stupid. Coupling with other algorithms like MCTS may gives better result, but there's no warranty.
+
 ## Dependency
 
 ```
